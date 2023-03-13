@@ -1,0 +1,5 @@
+Name of the service: DiagnosticSessionControl – 0x10  
+Name of the service: DiagnosticSessionControl – 0x10  
+Name of the service: DiagnosticSessionControl – 0x10  
+Name of the service: ECUReset – 0x11  
+Name of the service: SecurityAccess – 0x27  
