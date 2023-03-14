@@ -4,8 +4,11 @@ from datetime import datetime
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill
+import requests
+import json
 
-filename = "events_2023-03-12.csv"
+
+filename = "events_2023-03-13.csv"
 data = []
 
 
@@ -36,10 +39,29 @@ def convert_to_dict(string):
 
 
 events_data = []
-for row in data:
+# taking only 90000 to 100000 rows
+# for row in data[106382:125701]:
+for row in data[125700:129921]:
     # print(row[4], row[7], row[12], row[13])
     #append to events_data
+    # print(row[12])
     events_data.append({"target":row[4], "type":row[7], "event":row[12], "createdOn":row[13]})
+
+# function to fetch queue id from the target id
+def get_queue_id(target_id):
+    try:
+        url = "https://botpress.prod.niva.aws.pncloud.se/api/v1/bots/postnord/mod/clearIt/api/routing-api"
+        payload = {"Variables": {"IVA_CALL_ID": target_id}}
+        headers = {
+            'Content-Type': 'application/json',
+            'Cookie': 'AWSALB=nMsiZp9/1gwUvVn8FilDdUKXFR0i+3jcM7c3/zwvcar2XByAxLOdWhHFO1ohZN84ynCmacHNru6jRf2AA2pZ+vWphbAtd/q/1I7vjIIvif00JPhzktXjwpMMv0MH; AWSALBCORS=nMsiZp9/1gwUvVn8FilDdUKXFR0i+3jcM7c3/zwvcar2XByAxLOdWhHFO1ohZN84ynCmacHNru6jRf2AA2pZ+vWphbAtd/q/1I7vjIIvif00JPhzktXjwpMMv0MH'
+            }
+        response  = requests.request("POST", url, headers=headers, data=json.dumps(payload))
+        # print("Queue id for target id", target_id, "is", response.json()["Variables"]["queueGuid"])
+        return response.json()["Variables"]["queueGuid"]
+    except:
+        print("Error: Could not fetch queue id for target id", target_id)
+        return "ERROR"
 
 
 
@@ -96,18 +118,39 @@ def conversation_view(combined_target):
                  # convert createdOn to a hour and minute format
                  created_on = datetime.strptime(event_dict["createdOn"], "%Y-%m-%dT%H:%M:%S.%fZ").strftime("%H:%M")
 
-                 events.append({"createdOn":created_on, "direction":event_dict["direction"], "payload":event_dict["payload"]["text"]})
+                 events.append({"createdOn":created_on, "direction":event_dict["direction"], "payload":event_dict["payload"]["text"], "intent":event_dict["nlu"]["intent"]["name"]})
            
         
         # sort the event_dict based on the createdOn field
         events = sorted(events, key=lambda k: k["createdOn"])
         
         # create a conversation view for each target
-        conversation_views.append({"target":target["target"], "events":events})
+        queue_id = get_queue_id(target["target"])
+        conversation_views.append({"target":target["target"], "queue_id": queue_id , "events":events})
 
     return conversation_views
 
 conversations= conversation_view(combined_target)
+
+
+# curl --location 'https://botpress.prod.niva.aws.pncloud.se/api/v1/bots/postnord/mod/clearIt/api/routing-api' \
+# --header 'Content-Type: application/json' \
+# --header 'Cookie: AWSALB=nMsiZp9/1gwUvVn8FilDdUKXFR0i+3jcM7c3/zwvcar2XByAxLOdWhHFO1ohZN84ynCmacHNru6jRf2AA2pZ+vWphbAtd/q/1I7vjIIvif00JPhzktXjwpMMv0MH; AWSALBCORS=nMsiZp9/1gwUvVn8FilDdUKXFR0i+3jcM7c3/zwvcar2XByAxLOdWhHFO1ohZN84ynCmacHNru6jRf2AA2pZ+vWphbAtd/q/1I7vjIIvif00JPhzktXjwpMMv0MH' \
+# --data '{
+#     "Variables": {
+#         "IVA_CALL_ID": "258411551686106911702365268350364894253"
+#     }
+# }'
+
+# Response
+# {
+#     "Variables": {
+#         "queueGuid": "92d84637-73cf-4113-81a5-c112cf00bfc0",
+#         "transcriptions": "NA",
+#         "itemId": "21118876328SE"
+#     }
+# }
+
 
 
 
@@ -122,31 +165,43 @@ wb = openpyxl.Workbook()
 ws = wb.active
 
 # Define the column headers and write them to the first row of the worksheet
-headers = ["Target ID", "Direction", "Message"]
+headers = ["Target ID", "Direction","Intent", "Message", "Time"]
 ws.append(headers)
 
 # Define the color and font for the target ID, caller, and bot messages
 target_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
 caller_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
 bot_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+queue_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 font = Font(name="Calibri", size=11)
 
 # Loop through the chat conversations and write them to the worksheet
 for conv in conversations:
     target_id = conv["target"]
     events = conv["events"]
+    queue_id= conv["queue_id"]
 
     # Add a row for the target ID
     target_row = ["","Conversation ID", target_id, "", ""]
+    queue_row = ["","Queue ID", queue_id, "", ""]
     ws.append(target_row)
+    ws.append(queue_row)
+    # Fill the row with the target ID and queue ID
     for cell in ws[ws.max_row]:
         cell.font = font
         cell.fill = target_fill
+    for cell in ws[ws.max_row-1]:
+        cell.font = font
+        cell.fill = queue_fill
+
+
 
     # Add a row for each message in the conversation
     for event in events:
         direction = event["direction"]
         message = event["payload"]
+        createdOn = event["createdOn"]
+        intent = event["intent"]
 
         # Add formatting to the cell based on the message direction
         if direction == "incoming":
@@ -155,7 +210,7 @@ for conv in conversations:
             fill = bot_fill
 
         # Write the direction and message to the row
-        row = ["", direction, message]
+        row = ["", direction, intent, message, createdOn, ""]
         ws.append(row)
 
         if ws.max_row > 0:
@@ -170,4 +225,5 @@ for conv in conversations:
 ws.delete_cols(1)
 
 # Save the Excel file
-wb.save("chat_conversations.xlsx")
+# wb.save("chat_conversations_13_03_2023_15:OO-17:00.xlsx")
+wb.save("chat_conversations_05_PM_06_PM.xlsx")
